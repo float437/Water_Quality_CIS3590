@@ -3,6 +3,10 @@ import pandas as pd
 import numpy as np
 from scipy.stats import zscore
 import matplotlib.pyplot as plt
+import os
+
+CleanCSV_Name = "Clean_CSV"
+directory_path = f"{CleanCSV_Name}"
 
 #loading all the data into variables
 december16 = pd.read_csv("Raw_CSV/2021-dec16.csv")
@@ -36,22 +40,13 @@ october7['temp_z-score_oct7'] = zscore(october7["Temperature (c)"])
 december16['salinity_z-score_dec16'] = zscore(december16["Salinity (ppt)"])
 october21['salinity_z-score_oct21'] = zscore(october21["Salinity (ppt)"])
 november16['salinity_z-score_nov16'] = zscore(november16["Salinity (ppt)"])
-october7['salinity-score_oct7'] = zscore(october7["Salinity (ppt)"])
+october7['salinity_z-score_oct7'] = zscore(october7["Salinity (ppt)"])
 
 # Calculating the z-score for Odo
 december16['odo_z-score_dec16'] = zscore(december16["ODO mg/L"])
 october21['odo_z-score_oct21'] = zscore(october21["ODO mg/L"])
 november16['odo_z-score_nov16'] = zscore(november16["ODO mg/L"])
 october7['odo_z-score_oct7'] = zscore(october7["ODO mg/L"])
-
-# print(december16.columns)
-# print(october21.columns)
-# print(november16.columns)
-# print(october7.columns)
-
-# print(december16.head()) # or print(december16[:5])
-# print(december16.describe())
-
 
 # Part 2:
 print("\nTotal Rows in the frames")
@@ -61,24 +56,61 @@ print("October 21 total values:",len(october21.index))
 print("Novemeber 16 total values:",len(november16.index))
 print("October 7 total values:",len(october7.index))
 
-#TODO
-# Rows removed as outliers
-# find the number of values over the abs of 3 for the z score
+# TODO properly remove the rows with abs(zscore) > 3
+# TODO store in a dataframe that ONLY. contains the cleaned temp, salinity, and odo
+
+# Removing outliers : where abs(z score) > 3
 def cleaning_data_z_score(dataFrameName: pd.DataFrame, columnName :str) -> pd.DataFrame:
-    print(f"Cleaning Column : {columnName}")
-    result = dataFrameName[abs(dataFrameName[columnName] < 3)]
-    # print(result)
+    # print(f"Cleaning Column : {columnName} ({len(dataFrameName.index)})",end="")
+
+    result = dataFrameName[abs(dataFrameName[columnName]) < 3]
+
+    # print(f" -> {len(result)}")
     return result
 
-print("\nRows remaining after cleaning")
-# Filtering results and returning into a data frame
-cleanedDecember16 = cleaning_data_z_score(december16, "temp_z-score_dec16")
-print(len(cleanedDecember16.index))
-cleanedOctober21 = cleaning_data_z_score(october21, "temp_z-score_oct21")
-print(len(cleanedOctober21.index))
-cleanedNovember16 = cleaning_data_z_score(november16, "temp_z-score_nov16")
-print(len(cleanedNovember16.index))
-cleanedOctober7 = cleaning_data_z_score(october7,"temp_z-score_oct7")
-print(len(cleanedOctober7.index))
-# Exporting into MongoDB Database. 
-# Do i want to turn these into csv's then use another file to export into the DB?
+cleanedDecember16 = december16[["Time","temp_z-score_dec16","salinity_z-score_dec16","odo_z-score_dec16"]]
+cleanedOctober21 = october21[["Time","temp_z-score_oct21","salinity_z-score_oct21","odo_z-score_oct21"]]
+cleanedNovember16 = november16[["Time","temp_z-score_nov16","salinity_z-score_nov16","odo_z-score_nov16"]]
+cleanedOctober7 = october7[["Time","temp_z-score_oct7","salinity_z-score_oct7","odo_z-score_oct7"]]
+
+print(cleanedDecember16.columns)
+
+# Filtering results for Temp and returning into a data frame
+cleanedDecember16 = cleaning_data_z_score(cleanedDecember16, "temp_z-score_dec16")
+cleanedOctober21 = cleaning_data_z_score(cleanedOctober21, "temp_z-score_oct21")
+cleanedNovember16 = cleaning_data_z_score(cleanedNovember16, "temp_z-score_nov16")
+cleanedOctober7 = cleaning_data_z_score(cleanedOctober7,"temp_z-score_oct7")
+
+# Filtering results for Salinity and returning into a data frame
+cleanedDecember16 = cleaning_data_z_score(cleanedDecember16, "salinity_z-score_dec16")
+cleanedOctober21 = cleaning_data_z_score(cleanedOctober21, "salinity_z-score_oct21")
+cleanedNovember16 = cleaning_data_z_score(cleanedNovember16, "salinity_z-score_nov16")
+cleanedOctober7 = cleaning_data_z_score(cleanedOctober7,"salinity_z-score_oct7")
+
+# Filtering results for Odo and returning into a data frame
+cleanedDecember16 = cleaning_data_z_score(cleanedDecember16, "odo_z-score_dec16")
+cleanedOctober21 = cleaning_data_z_score(cleanedOctober21, "odo_z-score_oct21")
+cleanedNovember16 = cleaning_data_z_score(cleanedNovember16, "odo_z-score_nov16")
+cleanedOctober7 = cleaning_data_z_score(cleanedOctober7,"odo_z-score_oct7")
+
+# Summary
+print(f"Decmeber16 : {len(december16.index)}",f"After Cleaning :{len(cleanedDecember16.index)}.",f"Difference {len(december16.index) - len(cleanedDecember16.index)}")
+print(f"October21 : {len(october21.index)}",f"After Cleaning :{len(cleanedOctober21.index)}.",f"Difference {len(october21.index) - len(cleanedOctober21.index)}")
+print(f"November16 : {len(november16.index)}",f"After Cleaning :{len(cleanedNovember16.index)}.",f"Difference {len(november16.index) - len(cleanedNovember16.index)}")
+print(f"October7 : {len(october7.index)}",f"After Cleaning :{len(cleanedOctober7.index)}.",f"Difference {len(october7.index) - len(cleanedOctober7.index)}")
+
+
+print("Making Clean CSV's Directory...")
+try:
+    os.makedirs(directory_path, exist_ok=True)
+except OSError as e:
+    print(f"Error: {e}")
+print("Cleaned CSV Directory Made or exists!")
+
+print(f"Creating cleaned CSV's in {CleanCSV_Name}...")
+cleanedDecember16.to_csv(f"{directory_path}/cleanedDecember16.csv")
+cleanedOctober21.to_csv(f"{directory_path}/cleanedOctober21.csv")
+cleanedNovember16.to_csv(f"{directory_path}/cleanedNovember16.csv")
+cleanedOctober7.to_csv(f"{directory_path}/cleanedOctober7.csv")
+print("Cleaned CSV's Made!")
+
