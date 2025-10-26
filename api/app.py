@@ -3,7 +3,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus
-
+import pandas as pd
 import numpy as np
 from flask import Flask, jsonify, request
 from pymongo import MongoClient, ASCENDING
@@ -36,6 +36,243 @@ if MONGO_USER and MONGO_PASS and MONGO_CLUSTER_URL:
     MONGODB_URI = f"mongodb+srv://{user}:{pwd}@{MONGO_CLUSTER_URL}/?retryWrites=true&w=majority&tls=true"
 else:
     MONGODB_URI = "mongodb://localhost:27017"
+
+# ------------------------------------------------------------
+# DB client w/ fallback to mongomock + auto-seed from cleaned CSVs
+# ------------------------------------------------------------
+DB_NAME = os.getenv("DB_NAME", "water_quality_data")
+COLL_NAME = os.getenv("COLL_NAME", "asv_1")
+
+def _to_float(v):
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+def _normalize_row(r: dict) -> dict:
+    out = {}
+    # timestamp
+    for k in ["timestamp", "Timestamp", "DateTime", "Date", "Time", "Date m/d/y   "]:
+        if k in r and pd.notna(r[k]):
+            try:
+                out["timestamp"] = pd.to_datetime(r[k]).isoformat()
+                break
+            except Exception:
+                pass
+    # lat/lon
+    if "Latitude" in r:  out["latitude"]  = _to_float(r["Latitude"])
+    if "Longitude" in r: out["longitude"] = _to_float(r["Longitude"])
+    # numeric sensors
+    for src, dst in [
+        ("temperature","temperature"), ("Temperature (c)","temperature"), ("Temp C","temperature"),
+        ("salinity","salinity"), ("Salinity (ppt)","salinity"), ("Sal ppt","salinity"),
+        ("odo","odo"), ("ODO mg/L","odo"), ("ODOsat %","odo"),
+    ]:
+        if src in r and pd.notna(r[src]):
+            val = _to_float(r[src])
+            if val is not None:
+                out[dst] = val
+    return out
+
+def _seed_if_empty(col):
+    if col.estimated_document_count() > 0:
+        return
+    candidates = [
+        "data/Clean_CSV/cleanedOctober7.csv",
+        "data/Clean_CSV/cleanedOctober21.csv",
+        "data/Clean_CSV/cleanedNovember16.csv",
+        "data/Clean_CSV/cleanedDecember16.csv",
+        "Clean_CSV/cleanedOctober7.csv",
+        "Clean_CSV/cleanedOctober21.csv",
+        "Clean_CSV/cleanedNovember16.csv",
+        "Clean_CSV/cleanedDecember16.csv",
+    ]
+    total = 0
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                df = pd.read_csv(path)
+                docs = [_normalize_row(rec) for rec in df.to_dict(orient="records")]
+                docs = [d for d in docs if d.get("timestamp")]
+                if docs:
+                    col.insert_many(docs, ordered=False)
+                    total += len(docs)
+                    print(f"[seed] Loaded {len(docs)} rows from {path}")
+            except Exception as e:
+                print(f"[seed] Failed {path}: {e}")
+    print(f"[seed] Total loaded: {total}")
+
+def _get_db_and_col():
+    from pymongo import MongoClient
+    try:
+        client = MongoClient(MONGODB_URI, serverSelectionTimeoutMS=4000)
+        client.admin.command("ping")
+        print("[✅ MongoDB] Connected:", MONGODB_URI)
+        return client[DB_NAME], COLL_NAME, False  # not mock
+    except Exception as e:
+        print(f"[ℹ️ MongoDB] Not available, falling back to mongomock: {e}")
+        import mongomock
+        client = mongomock.MongoClient()
+        print("[➡️  Using mongomock (in-memory)]")
+        return client[DB_NAME], COLL_NAME, True
+    
+app = Flask(__name__)
+
+db, _COLL, _IS_MOCK = _get_db_and_col()
+col = db[_COLL]
+if _IS_MOCK:
+    _seed_if_empty(col)
+
+# =======================
+# Helpers for query build
+# =======================
+def _query_from_args(args):
+    q = {}
+    # time range (note: timestamps stored as ISO strings; we filter with ISO strings)
+    start = args.get("start")
+    end   = args.get("end")
+    if start or end:
+        t = {}
+        if start:
+            t["$gte"] = pd.to_datetime(start).isoformat()
+        if end:
+            t["$lte"] = pd.to_datetime(end).isoformat()
+        q["timestamp"] = t
+
+    def add_range(field, kmin, kmax):
+        lo = args.get(kmin, None)
+        hi = args.get(kmax, None)
+        r = {}
+        if lo is not None and lo != "":
+            r["$gte"] = float(lo)
+        if hi is not None and hi != "":
+            r["$lte"] = float(hi)
+        if r:
+            q[field] = r
+
+    add_range("temperature", "min_temp", "max_temp")
+    add_range("salinity",    "min_sal",  "max_sal")
+    add_range("odo",         "min_odo",  "max_odo")
+    return q
+
+def _to_df(docs):
+    if not docs:
+        return pd.DataFrame()
+    df = pd.DataFrame(docs)
+    # coerce timestamp + numerics
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    for c in ["temperature", "salinity", "odo", "latitude", "longitude"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df
+
+def _df_to_items(df):
+    if df.empty:
+        return []
+    out = df.copy()
+    if "timestamp" in out.columns:
+        out["timestamp"] = out["timestamp"].dt.tz_localize(None).dt.isoformat()
+    # keep only known fields if you prefer:
+    # fields = ["timestamp","temperature","salinity","odo","latitude","longitude"]
+    # out = out[ [c for c in fields if c in out.columns] ]
+    return out.where(pd.notnull(out), None).to_dict(orient="records")
+
+
+# ===========
+# Endpoints
+# ===========
+
+@app.get("/api/observations")
+def observations():
+    try:
+        limit = int(request.args.get("limit", 100))
+        limit = max(1, min(limit, 1000))
+        skip  = int(request.args.get("skip", 0))
+
+        query = _query_from_args(request.args)
+        total = col.count_documents(query)
+
+        cursor = (
+            col.find(query, {"_id": 0})
+               .sort("timestamp", ASCENDING)
+               .skip(skip)
+               .limit(limit)
+        )
+        items = list(cursor)
+        return jsonify({"count": total, "items": items})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/stats")
+def stats():
+    try:
+        query = _query_from_args(request.args)
+        docs = list(col.find(query, {"_id": 0}))
+        df = _to_df(docs)
+
+        result = {}
+        for field in ["temperature", "salinity", "odo"]:
+            if field in df.columns:
+                s = pd.to_numeric(df[field], errors="coerce").dropna()
+                if s.empty:
+                    result[field] = {"count": 0}
+                else:
+                    p25, p50, p75 = np.percentile(s, [25, 50, 75])
+                    result[field] = {
+                        "count": int(s.count()),
+                        "mean":  float(s.mean()),
+                        "min":   float(s.min()),
+                        "max":   float(s.max()),
+                        "p25":   float(p25),
+                        "p50":   float(p50),
+                        "p75":   float(p75),
+                    }
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/outliers")
+def outliers():
+    try:
+        field  = request.args.get("field", "temperature")
+        method = request.args.get("method", "iqr").lower()
+        k      = float(request.args.get("k", 1.5))
+
+        if field not in ["temperature", "salinity", "odo"]:
+            return jsonify({"error": "field must be one of temperature, salinity, odo"}), 400
+
+        query = _query_from_args(request.args)
+        docs = list(col.find(query, {"_id": 0}))
+        df = _to_df(docs)
+
+        if df.empty or field not in df.columns:
+            return jsonify([])
+
+        s = pd.to_numeric(df[field], errors="coerce")
+        dff = df.copy()
+        dff[field] = s
+        dff = dff.dropna(subset=[field])
+
+        if dff.empty:
+            return jsonify([])
+
+        if method == "zscore":
+            mu = dff[field].mean()
+            sd = dff[field].std(ddof=0) or 1.0
+            flagged = dff[(dff[field] - mu).abs() / sd > k]
+        else:
+            q1, q3 = dff[field].quantile([0.25, 0.75])
+            iqr = q3 - q1
+            lo, hi = q1 - k * iqr, q3 + k * iqr
+            flagged = dff[(dff[field] < lo) | (dff[field] > hi)]
+
+        return jsonify(_df_to_items(flagged))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 # ------------------------------------------------------------
 # Initialize Flask + MongoDB Client with Error Handling
