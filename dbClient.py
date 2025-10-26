@@ -9,6 +9,7 @@ load_dotenv()
 MONGO_USER = os.environ.get("MONGO_USER")
 MONGO_PASSWORD = os.environ.get("MONGO_PASSWORD")
 MONGO_CLUSTER_URL = os.environ.get("MONGO_CLUSTER_URL")
+csvFileName = "cleanedOctober7"
 
 url = (f"mongodb+srv://{MONGO_USER}:{MONGO_PASSWORD}@{MONGO_CLUSTER_URL}/?retryWrites=true&w=majority&appName=WaterQuality")
 
@@ -22,7 +23,7 @@ try:
 
     cleanFilesDB = client.get_database("water_quality_data")
 
-    clean_CSV = pd.read_csv("data/Clean_CSV/cleanedOctober7.csv")
+    clean_CSV = pd.read_csv(f"data/Clean_CSV/{csvFileName}.csv")
     clean_CSV = clean_CSV.to_dict('records')
     result = cleanFilesDB.collection.insert_many(clean_CSV)
     print(f"Successfully inserted {len(result.inserted_ids)} documents.")
