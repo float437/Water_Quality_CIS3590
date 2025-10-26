@@ -12,7 +12,6 @@ import requests
 st.set_page_config(page_title="Water Quality Client", layout="wide")
 st.title("Water Quality — Streamlit Client")
 st.caption("Streamlit client that consumes the Flask API")
-
 DEFAULT_API = os.getenv("WQ_API_BASE", "http://127.0.0.1:5050").rstrip("/")
 
 # ---------------------------------
