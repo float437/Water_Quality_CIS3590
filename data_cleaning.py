@@ -21,10 +21,10 @@ october7 = pd.read_csv("data/Raw_CSV/2022-oct7.csv")
 # print(october7.columns)
 
 # gathering relevant info from the dataframes
-december16 = december16[["Time","Latitude","Longitude","Temperature (c)","Salinity (ppt)","ODO mg/L"]]
-october21 = october21[["Time","Latitude","Longitude","Temperature (c)","Salinity (ppt)","ODO mg/L"]]
-november16 = november16[["Time","Latitude","Longitude","Temperature (c)","Salinity (ppt)","ODO mg/L"]]
-october7 = october7[["Time","Latitude","Longitude","Temperature (c)","Salinity (ppt)","ODO mg/L"]]
+december16 = december16[["Time","Temperature (c)","Salinity (ppt)","ODO mg/L"]]
+october21 = october21[["Time","Temperature (c)","Salinity (ppt)","ODO mg/L"]]
+november16 = november16[["Time","Temperature (c)","Salinity (ppt)","ODO mg/L"]]
+october7 = october7[["Time","Temperature (c)","Salinity (ppt)","ODO mg/L"]]
 
 # Cleaning data using z-score method
 # Should I manually calculate the z-score instead of importing from a library
@@ -56,9 +56,6 @@ print("October 21 total values:",len(october21.index))
 print("Novemeber 16 total values:",len(november16.index))
 print("October 7 total values:",len(october7.index))
 
-# TODO properly remove the rows with abs(zscore) > 3
-# TODO store in a dataframe that ONLY. contains the cleaned temp, salinity, and odo
-
 # Removing outliers : where abs(z score) > 3
 def cleaning_data_z_score(dataFrameName: pd.DataFrame, columnName :str) -> pd.DataFrame:
     # print(f"Cleaning Column : {columnName} ({len(dataFrameName.index)})",end="")
@@ -68,10 +65,10 @@ def cleaning_data_z_score(dataFrameName: pd.DataFrame, columnName :str) -> pd.Da
     # print(f" -> {len(result)}")
     return result
 
-cleanedDecember16 = december16[["Time","temp_z-score","salinity_z-score","odo_z-score"]]
-cleanedOctober21 = october21[["Time","temp_z-score","salinity_z-score","odo_z-score"]]
-cleanedNovember16 = november16[["Time","temp_z-score","salinity_z-score","odo_z-score"]]
-cleanedOctober7 = october7[["Time","temp_z-score","salinity_z-score","odo_z-score"]]
+cleanedDecember16 = december16[["Time","Temperature (c)","Salinity (ppt)","ODO mg/L","temp_z-score","salinity_z-score","odo_z-score"]]
+cleanedOctober21 = october21[["Time","Temperature (c)","Salinity (ppt)","ODO mg/L","temp_z-score","salinity_z-score","odo_z-score"]]
+cleanedNovember16 = november16[["Time","Temperature (c)","Salinity (ppt)","ODO mg/L","temp_z-score","salinity_z-score","odo_z-score"]]
+cleanedOctober7 = october7[["Time","Temperature (c)","Salinity (ppt)","ODO mg/L","temp_z-score","salinity_z-score","odo_z-score"]]
 
 def set_column_to_date(
     df: pd.DataFrame, 
@@ -129,7 +126,7 @@ except OSError as e:
 print("Cleaned CSV Directory Made or exists!")
 
 print(f"Creating cleaned CSV's in {CleanCSV_Name}...")
-cleanedDecember16.to_csv(f"{directory_path}/cleanedDecember16.csv")
+# cleanedDecember16.to_csv(f"{directory_path}/cleanedDecember16.csv")
 cleanedOctober21.to_csv(f"{directory_path}/cleanedOctober21.csv")
 cleanedNovember16.to_csv(f"{directory_path}/cleanedNovember16.csv")
 cleanedOctober7.to_csv(f"{directory_path}/cleanedOctober7.csv")
